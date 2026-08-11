@@ -10,7 +10,6 @@ const { sequelize } = require('./config/database');
 const authRoutes = require('./routes/auth');
 const characterRoutes = require('./routes/characters');
 const chatRoutes = require('./routes/chat');
-const callRoutes = require('./routes/call');
 const errorHandler = require('./middleware/errorHandler');
 
 const app = express();
@@ -27,7 +26,6 @@ app.use('/uploads', express.static(uploadsDir));
 app.use('/api/auth', authRoutes);
 app.use('/api/characters', characterRoutes);
 app.use('/api/chat', chatRoutes);
-app.use('/api/call', callRoutes);
 
 app.use(errorHandler);
 

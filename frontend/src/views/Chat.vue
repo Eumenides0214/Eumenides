@@ -14,11 +14,10 @@
           </div>
         </div>
       </div>
-      <el-button type="success" :icon="Phone" @click="handleVoiceCall">语音通话</el-button>
     </div>
 
     <div ref="messagesRef" class="messages-container">
-      <el-empty v-if="!messages.length" description="开始和 {{ character?.name }} 聊天吧！" />
+      <el-empty v-if="!messages.length" :description="`开始和 ${character?.name || '角色'} 聊天吧！`" />
 
       <div
         v-for="msg in messages"
@@ -63,9 +62,17 @@
 
     <div class="input-area">
       <div class="toolbar">
-        <el-button :icon="Microphone" :type="recording ? 'danger' : ''" @click="toggleRecord">
-          {{ recording ? '松开发送' : '录音' }}
-        </el-button>
+        <div class="toolbar-left">
+          <el-button :icon="Microphone" :type="recording ? 'danger' : ''" :disabled="loading && !recording" @click="toggleRecord">
+            {{ recording ? '停止并发送' : '录音' }}
+          </el-button>
+          <el-switch
+            v-model="voiceReplyEnabled"
+            active-text="语音回复"
+            inactive-text="文字回复"
+            @change="saveVoiceReplyPreference"
+          />
+        </div>
         <el-button text :icon="Delete" @click="handleClear">清空聊天</el-button>
       </div>
       <div class="input-row">
@@ -83,20 +90,7 @@
       </div>
     </div>
 
-    <audio ref="audioRef" @ended="audioRef.value.pause()"></audio>
-
-    <el-dialog v-model="callDialog.visible" title="语音通话中" width="360px" center :close-on-click-modal="false">
-      <div class="call-body">
-        <el-avatar :size="100" :src="character?.avatar">
-          {{ character?.name?.charAt(0) }}
-        </el-avatar>
-        <div class="call-character-name">{{ character?.name }}</div>
-        <div class="call-duration">通话时长：{{ callDuration }}s</div>
-      </div>
-      <template #footer>
-        <el-button type="danger" @click="endVoiceCall">挂断</el-button>
-      </template>
-    </el-dialog>
+    <audio ref="audioRef" @ended="handleAudioEnded"></audio>
   </div>
 </template>
 
@@ -104,11 +98,10 @@
 import { ref, onMounted, onUnmounted, nextTick } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { ElMessage, ElMessageBox } from 'element-plus';
-import { ArrowLeft, Phone, VideoPlay, Microphone, Delete, Promotion } from '@element-plus/icons-vue';
+import { ArrowLeft, VideoPlay, Microphone, Delete, Promotion } from '@element-plus/icons-vue';
 import { useUserStore } from '@/stores/user';
 import { getCharacter } from '@/api/characters';
 import { getMessages, sendMessage, sendVoice, clearMessages } from '@/api/chat';
-import { initiateCall, endCall } from '@/api/call';
 
 const route = useRoute();
 const router = useRouter();
@@ -121,14 +114,16 @@ const input = ref('');
 const loading = ref(false);
 const messagesRef = ref();
 const audioRef = ref();
+const voiceReplyEnabled = ref(localStorage.getItem('voiceReplyEnabled') === 'true');
 
 const recording = ref(false);
-let mediaRecorder = null;
-let recordChunks = [];
-
-const callDialog = ref({ visible: false, callId: '' });
-const callDuration = ref(0);
-let callTimer = null;
+let mediaStream = null;
+let audioContext = null;
+let sourceNode = null;
+let recorderNode = null;
+let recordedSamples = [];
+let recordedLength = 0;
+let recordingSampleRate = 44100;
 
 async function load() {
   try {
@@ -171,9 +166,12 @@ async function handleSend() {
 
   loading.value = true;
   try {
-    const res = await sendMessage(characterId, text);
+    const res = await sendMessage(characterId, text, { voiceReply: voiceReplyEnabled.value });
     const d = res.data;
-    if (d.assistantMessage) messages.value.push(d.assistantMessage);
+    if (d.assistantMessage) {
+      messages.value.push(d.assistantMessage);
+      maybePlayAssistantVoice(d.assistantMessage);
+    }
     scrollToBottom();
   } catch {
     messages.value.pop();
@@ -185,35 +183,32 @@ async function handleSend() {
 async function toggleRecord() {
   if (!recording.value) {
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      mediaRecorder = new MediaRecorder(stream);
-      recordChunks = [];
-      mediaRecorder.ondataavailable = (e) => {
-        if (e.data.size > 0) recordChunks.push(e.data);
-      };
-      mediaRecorder.onstop = async () => {
-        const blob = new Blob(recordChunks, { type: 'audio/webm' });
-        stream.getTracks().forEach((t) => t.stop());
-        await handleVoiceSend(blob);
-      };
-      mediaRecorder.start();
+      if (!navigator.mediaDevices?.getUserMedia) {
+        ElMessage.error('当前浏览器不支持录音');
+        return;
+      }
+
+      mediaStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      startWavRecorder(mediaStream);
       recording.value = true;
     } catch (err) {
       ElMessage.error('无法访问麦克风：' + err.message);
     }
   } else {
-    mediaRecorder.stop();
-    recording.value = false;
+    await stopWavRecorder(true);
   }
 }
 
 async function handleVoiceSend(blob) {
   loading.value = true;
   try {
-    const res = await sendVoice(characterId, blob, '');
+    const res = await sendVoice(characterId, blob, '', { voiceReply: voiceReplyEnabled.value });
     const d = res.data;
     messages.value.push(d.userMessage);
-    if (d.assistantMessage) messages.value.push(d.assistantMessage);
+    if (d.assistantMessage) {
+      messages.value.push(d.assistantMessage);
+      maybePlayAssistantVoice(d.assistantMessage);
+    }
     scrollToBottom();
   } catch {} finally {
     loading.value = false;
@@ -222,8 +217,130 @@ async function handleVoiceSend(blob) {
 
 function playVoice(url) {
   const fullUrl = url.startsWith('http') ? url : url;
+  if (!audioRef.value) return;
   audioRef.value.src = fullUrl;
-  audioRef.value.play();
+  audioRef.value.play().catch(() => {});
+}
+
+function maybePlayAssistantVoice(message) {
+  if (voiceReplyEnabled.value && message?.contentType === 'voice' && message.mediaUrl) {
+    nextTick(() => playVoice(message.mediaUrl));
+  }
+}
+
+function handleAudioEnded() {
+  audioRef.value?.pause();
+}
+
+function saveVoiceReplyPreference() {
+  localStorage.setItem('voiceReplyEnabled', String(voiceReplyEnabled.value));
+}
+
+function startWavRecorder(stream) {
+  const AudioContextCtor = window.AudioContext || window.webkitAudioContext;
+  if (!AudioContextCtor) {
+    throw new Error('当前浏览器不支持音频采集');
+  }
+
+  audioContext = new AudioContextCtor();
+  recordingSampleRate = audioContext.sampleRate;
+  recordedSamples = [];
+  recordedLength = 0;
+
+  sourceNode = audioContext.createMediaStreamSource(stream);
+  recorderNode = audioContext.createScriptProcessor(4096, 1, 1);
+  recorderNode.onaudioprocess = (event) => {
+    if (!recording.value) return;
+
+    const input = event.inputBuffer.getChannelData(0);
+    const copy = new Float32Array(input.length);
+    copy.set(input);
+    recordedSamples.push(copy);
+    recordedLength += copy.length;
+
+    event.outputBuffer.getChannelData(0).fill(0);
+  };
+
+  sourceNode.connect(recorderNode);
+  recorderNode.connect(audioContext.destination);
+}
+
+async function stopWavRecorder(shouldSend) {
+  recording.value = false;
+
+  recorderNode?.disconnect();
+  sourceNode?.disconnect();
+  recorderNode = null;
+  sourceNode = null;
+  stopMediaStream();
+
+  const chunks = recordedSamples;
+  const totalLength = recordedLength;
+  const sampleRate = recordingSampleRate;
+  recordedSamples = [];
+  recordedLength = 0;
+
+  if (audioContext) {
+    await audioContext.close().catch(() => {});
+    audioContext = null;
+  }
+
+  if (!shouldSend) return;
+  if (!totalLength) {
+    ElMessage.warning('没有录到声音');
+    return;
+  }
+
+  await handleVoiceSend(encodeWav(mergeSamples(chunks, totalLength), sampleRate));
+}
+
+function stopMediaStream() {
+  mediaStream?.getTracks().forEach((track) => track.stop());
+  mediaStream = null;
+}
+
+function mergeSamples(chunks, totalLength) {
+  const samples = new Float32Array(totalLength);
+  let offset = 0;
+  for (const chunk of chunks) {
+    samples.set(chunk, offset);
+    offset += chunk.length;
+  }
+  return samples;
+}
+
+function encodeWav(samples, sampleRate) {
+  const buffer = new ArrayBuffer(44 + samples.length * 2);
+  const view = new DataView(buffer);
+
+  writeAscii(view, 0, 'RIFF');
+  view.setUint32(4, 36 + samples.length * 2, true);
+  writeAscii(view, 8, 'WAVE');
+  writeAscii(view, 12, 'fmt ');
+  view.setUint32(16, 16, true);
+  view.setUint16(20, 1, true);
+  view.setUint16(22, 1, true);
+  view.setUint32(24, sampleRate, true);
+  view.setUint32(28, sampleRate * 2, true);
+  view.setUint16(32, 2, true);
+  view.setUint16(34, 16, true);
+  writeAscii(view, 36, 'data');
+  view.setUint32(40, samples.length * 2, true);
+
+  let offset = 44;
+  for (const sample of samples) {
+    const clamped = Math.max(-1, Math.min(1, sample));
+    view.setInt16(offset, clamped < 0 ? clamped * 0x8000 : clamped * 0x7fff, true);
+    offset += 2;
+  }
+
+  return new Blob([buffer], { type: 'audio/wav' });
+}
+
+function writeAscii(view, offset, text) {
+  for (let i = 0; i < text.length; i++) {
+    view.setUint8(offset + i, text.charCodeAt(i));
+  }
 }
 
 async function handleClear() {
@@ -235,31 +352,10 @@ async function handleClear() {
   } catch {}
 }
 
-async function handleVoiceCall() {
-  try {
-    const res = await initiateCall(characterId);
-    callDialog.value.visible = true;
-    callDialog.value.callId = res.data.callId;
-    callDuration.value = 0;
-    callTimer = setInterval(() => {
-      callDuration.value++;
-    }, 1000);
-  } catch {}
-}
-
-async function endVoiceCall() {
-  if (callTimer) clearInterval(callTimer);
-  callDialog.value.visible = false;
-  if (callDialog.value.callId) {
-    try {
-      await endCall(callDialog.value.callId);
-    } catch {}
-  }
-}
-
 onMounted(load);
 onUnmounted(() => {
-  if (callTimer) clearInterval(callTimer);
+  stopWavRecorder(false);
+  stopMediaStream();
 });
 </script>
 
@@ -354,8 +450,15 @@ onUnmounted(() => {
 }
 .toolbar {
   display: flex;
+  justify-content: space-between;
+  align-items: center;
   gap: 8px;
   margin-bottom: 8px;
+}
+.toolbar-left {
+  display: flex;
+  align-items: center;
+  gap: 12px;
 }
 .input-row {
   display: flex;
@@ -364,19 +467,5 @@ onUnmounted(() => {
 }
 .input-row .el-button {
   height: 40px;
-}
-.call-body {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 16px;
-  padding: 20px 0;
-}
-.call-character-name {
-  font-size: 18px;
-  font-weight: 600;
-}
-.call-duration {
-  color: #909399;
 }
 </style>
