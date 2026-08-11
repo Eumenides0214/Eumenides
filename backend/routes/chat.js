@@ -6,6 +6,7 @@ const Message = require('../models/Message');
 const auth = require('../middleware/auth');
 const { chat } = require('../services/llmService');
 const { synthesizeVoice } = require('../services/ttsService');
+const { transcribeVoice } = require('../services/asrService');
 
 const router = express.Router();
 
@@ -13,7 +14,10 @@ const storage = multer.diskStorage({
   destination: (req, file, cb) => cb(null, path.join(__dirname, '..', 'uploads')),
   filename: (req, file, cb) => {
     const unique = Date.now() + '-' + Math.round(Math.random() * 1e9);
-    cb(null, `${unique}-${file.originalname}`);
+    const originalExt = path.extname(file.originalname || '');
+    const ext = originalExt || extensionFromMime(file.mimetype) || '.webm';
+    const base = path.basename(file.originalname || 'voice', originalExt).replace(/[^\w.-]/g, '') || 'voice';
+    cb(null, `${unique}-${base}${ext}`);
   },
 });
 const upload = multer({ storage, limits: { fileSize: 20 * 1024 * 1024 } });
@@ -38,6 +42,7 @@ router.post('/:characterId/messages', auth, async (req, res, next) => {
   try {
     const { characterId } = req.params;
     const { content } = req.body;
+    const voiceReply = parseBoolean(req.body.voiceReply);
 
     if (!content) return res.status(400).json({ code: 400, message: '消息内容不能为空' });
 
@@ -60,10 +65,9 @@ router.post('/:characterId/messages', auth, async (req, res, next) => {
 
     const assistantReply = await chat(character, history, content);
 
-    const replyMode = Math.random() < 0.5 ? 'text' : 'voice';
     let mediaUrl = null;
 
-    if (replyMode === 'voice') {
+    if (voiceReply) {
       try {
         mediaUrl = await synthesizeVoice(assistantReply, character.voiceType);
       } catch (e) {
@@ -97,12 +101,21 @@ router.post('/:characterId/voice', auth, upload.single('voice'), async (req, res
   try {
     const { characterId } = req.params;
     if (!req.file) return res.status(400).json({ code: 400, message: '请上传语音文件' });
+    const voiceReply = parseBoolean(req.body.voiceReply);
 
     const character = await Character.findOne({ where: { id: characterId, userId: req.userId } });
     if (!character) return res.status(404).json({ code: 404, message: '角色不存在' });
 
     const voiceUrl = `/uploads/${req.file.filename}`;
-    const asrText = req.body.text || '[语音消息]';
+    let asrText = String(req.body.text || '').trim();
+    if (!asrText) {
+      try {
+        asrText = await transcribeVoice(req.file.path);
+      } catch (e) {
+        console.warn('[ASR] 语音识别失败:', e.message);
+        return res.status(502).json({ code: 502, message: `语音识别失败：${e.message}` });
+      }
+    }
 
     const userMsg = await Message.create({
       userId: req.userId,
@@ -121,10 +134,9 @@ router.post('/:characterId/voice', auth, upload.single('voice'), async (req, res
 
     const assistantReply = await chat(character, history, asrText);
 
-    const replyMode = Math.random() < 0.5 ? 'text' : 'voice';
     let mediaUrl = null;
 
-    if (replyMode === 'voice') {
+    if (voiceReply) {
       try {
         mediaUrl = await synthesizeVoice(assistantReply, character.voiceType);
       } catch (e) {
@@ -168,3 +180,19 @@ router.delete('/:characterId/messages', auth, async (req, res, next) => {
 });
 
 module.exports = router;
+
+function parseBoolean(value) {
+  return value === true || value === 'true' || value === '1' || value === 1;
+}
+
+function extensionFromMime(mimeType) {
+  const map = {
+    'audio/webm': '.webm',
+    'audio/ogg': '.ogg',
+    'audio/mp4': '.m4a',
+    'audio/mpeg': '.mp3',
+    'audio/wav': '.wav',
+    'audio/x-wav': '.wav',
+  };
+  return map[String(mimeType || '').split(';')[0].toLowerCase()];
+}
