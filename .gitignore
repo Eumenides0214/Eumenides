@@ -9,6 +9,7 @@ backend/node_modules/
 backend/logs/
 backend/.env
 backend/npm-debug.log
+backend/uploads/
 
 # 系统缓存文件
 .DS_Store
