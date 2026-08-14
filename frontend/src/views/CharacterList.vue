@@ -1,62 +1,52 @@
 <template>
-  <div class="page">
-    <div class="page-header">
-      <h2>我的角色</h2>
-      <el-button type="primary" :icon="Plus" @click="$router.push('/characters/new')">创建角色</el-button>
+  <div class="page-shell character-page">
+    <div class="page-hero">
+      <div>
+        <p class="eyebrow">My Characters</p>
+        <h1>我的角色</h1>
+        <p>管理你的 AI 角色，快速开始文字或语音互动。</p>
+      </div>
+      <div class="hero-actions">
+        <el-input v-model="keyword" :prefix-icon="Search" placeholder="搜索角色、标签或描述" clearable />
+        <el-button type="primary" :icon="Plus" @click="$router.push('/characters/new')">创建角色</el-button>
+      </div>
     </div>
 
-    <div v-if="loading" class="loading">
-      <el-skeleton :rows="3" animated />
-    </div>
-
-    <el-empty v-else-if="!characters.length" description="还没有创建角色，快去创建一个吧！" />
+    <el-skeleton v-if="loading" :rows="6" animated />
+    <el-empty v-else-if="!characters.length" description="还没有创建角色">
+      <el-button type="primary" :icon="Plus" @click="$router.push('/characters/new')">创建第一个角色</el-button>
+    </el-empty>
 
     <div v-else class="character-grid">
-      <el-card
-        v-for="char in characters"
+      <CharacterCard
+        v-for="char in filteredCharacters"
         :key="char.id"
-        class="character-card"
-        shadow="hover"
-        @click="$router.push(`/chat/${char.id}`)"
-      >
-        <div class="card-avatar">
-          <el-avatar :size="80" :src="char.avatar">
-            {{ char.name?.charAt(0) }}
-          </el-avatar>
-        </div>
-        <div class="card-name">{{ char.name }}</div>
-        <div class="card-info">
-          {{ char.gender === 'male' ? '男' : char.gender === 'female' ? '女' : '其他' }} · {{ char.age }}岁
-        </div>
-        <div class="card-tags">
-          <el-tag v-for="tag in (char.tags || []).slice(0, 3)" :key="tag" size="small" type="info" effect="plain">
-            {{ tag }}
-          </el-tag>
-        </div>
-        <div class="card-actions" @click.stop>
-          <el-button size="small" :icon="ChatDotRound" type="primary" @click="$router.push(`/chat/${char.id}`)">聊天</el-button>
-          <el-button size="small" :icon="Edit" @click="$router.push(`/characters/${char.id}/edit`)">编辑</el-button>
-          <el-popconfirm title="确定删除该角色吗？" @confirm="handleDelete(char.id)">
-            <template #reference>
-              <el-button size="small" type="danger" :icon="Delete" plain>删除</el-button>
-            </template>
-          </el-popconfirm>
-        </div>
-      </el-card>
+        :character="char"
+        @delete="handleDelete"
+      />
     </div>
   </div>
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue';
-import { useRouter } from 'vue-router';
+import { computed, onMounted, ref } from 'vue';
 import { ElMessage } from 'element-plus';
-import { Plus, Edit, Delete, ChatDotRound } from '@element-plus/icons-vue';
-import { getCharacters, deleteCharacter } from '@/api/characters';
+import { Plus, Search } from '@element-plus/icons-vue';
+import CharacterCard from '@/components/character/CharacterCard.vue';
+import { deleteCharacter, getCharacters } from '@/api/characters';
 
-const router = useRouter();
 const loading = ref(true);
+const keyword = ref('');
 const characters = ref([]);
+
+const filteredCharacters = computed(() => {
+  const q = keyword.value.trim().toLowerCase();
+  if (!q) return characters.value;
+  return characters.value.filter((char) => {
+    const tags = (char.tags || []).join(' ');
+    return `${char.name} ${char.description} ${tags} ${char.voiceType}`.toLowerCase().includes(q);
+  });
+});
 
 async function load() {
   loading.value = true;
@@ -80,57 +70,59 @@ onMounted(load);
 </script>
 
 <style scoped>
-.page-header {
+.character-page {
+  display: grid;
+  gap: 24px;
+}
+
+.page-hero {
   display: flex;
   justify-content: space-between;
-  align-items: center;
-  margin-bottom: 20px;
+  align-items: flex-end;
+  gap: 24px;
+  padding: 28px;
+  border-radius: var(--radius-xl);
+  background: linear-gradient(135deg, rgba(115, 87, 232, 0.14), rgba(255, 255, 255, 0.92));
+  border: 1px solid rgba(115, 87, 232, 0.14);
 }
-.page-header h2 {
-  font-size: 22px;
-  color: #303133;
+
+.eyebrow {
+  margin: 0 0 8px;
+  color: var(--primary);
+  font-weight: 800;
 }
+
+.page-hero h1 {
+  margin: 0 0 8px;
+  font-size: 32px;
+}
+
+.page-hero p {
+  margin: 0;
+  color: var(--text-secondary);
+}
+
+.hero-actions {
+  min-width: min(420px, 100%);
+  display: flex;
+  gap: 12px;
+}
+
 .character-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
   gap: 20px;
 }
-.character-card {
-  cursor: pointer;
-  text-align: center;
-  transition: transform 0.2s;
-}
-.character-card:hover {
-  transform: translateY(-4px);
-}
-.card-avatar {
-  margin-bottom: 12px;
-}
-.card-name {
-  font-size: 18px;
-  font-weight: 600;
-  color: #303133;
-  margin-bottom: 4px;
-}
-.card-info {
-  color: #909399;
-  font-size: 13px;
-  margin-bottom: 8px;
-}
-.card-tags {
-  display: flex;
-  justify-content: center;
-  gap: 4px;
-  flex-wrap: wrap;
-  margin-bottom: 12px;
-}
-.card-actions {
-  display: flex;
-  gap: 6px;
-  justify-content: center;
-}
-.loading {
-  max-width: 600px;
-  margin: 0 auto;
+
+@media (max-width: 768px) {
+  .page-hero {
+    align-items: stretch;
+    flex-direction: column;
+    padding: 24px;
+  }
+
+  .hero-actions {
+    flex-direction: column;
+  }
 }
 </style>

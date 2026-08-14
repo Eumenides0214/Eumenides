@@ -1,7 +1,7 @@
 <template>
   <div class="auth-container">
     <div class="auth-card">
-      <h2 class="auth-title">AI模拟play</h2>
+      <h2 class="auth-title">AiChat</h2>
       <p class="auth-subtitle">登录你的账号</p>
       <el-form :model="form" :rules="rules" ref="formRef" label-width="0">
         <el-form-item prop="email">
@@ -50,7 +50,7 @@ async function submit() {
   try {
     await userStore.login(form.value.email, form.value.password);
     ElMessage.success('登录成功');
-    router.push(route.query.redirect || '/');
+    router.push(route.query.redirect || '/home');
   } catch {} finally {
     loading.value = false;
   }
@@ -63,34 +63,40 @@ async function submit() {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  padding: 20px;
+  background:
+    radial-gradient(circle at 18% 18%, rgba(54, 179, 126, 0.12), transparent 28%),
+    radial-gradient(circle at 82% 20%, rgba(115, 87, 232, 0.18), transparent 30%),
+    var(--page-bg);
 }
 .auth-card {
   width: 400px;
   padding: 40px;
-  background: #fff;
-  border-radius: 16px;
-  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.15);
+  background: rgba(255, 255, 255, 0.92);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-xl);
+  box-shadow: var(--shadow-hover);
+  backdrop-filter: blur(16px);
 }
 .auth-title {
   text-align: center;
   font-size: 28px;
   margin-bottom: 8px;
-  background: linear-gradient(135deg, #667eea, #764ba2);
+  background: linear-gradient(135deg, var(--primary), #9b8cff);
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
 }
 .auth-subtitle {
   text-align: center;
-  color: #909399;
+  color: var(--text-secondary);
   margin-bottom: 30px;
 }
 .auth-footer {
   text-align: center;
-  color: #909399;
+  color: var(--text-secondary);
 }
 .auth-footer a {
-  color: #667eea;
+  color: var(--primary);
   text-decoration: none;
 }
 </style>

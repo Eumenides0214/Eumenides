@@ -57,11 +57,7 @@ router.post('/:characterId/messages', auth, async (req, res, next) => {
       content,
     });
 
-    const history = await Message.findAll({
-      where: { userId: req.userId, characterId },
-      order: [['createdAt', 'ASC']],
-      limit: 20,
-    });
+    const history = await getRecentMessages(req.userId, characterId);
 
     const assistantReply = await chat(character, history, content);
 
@@ -126,11 +122,7 @@ router.post('/:characterId/voice', auth, upload.single('voice'), async (req, res
       mediaUrl: voiceUrl,
     });
 
-    const history = await Message.findAll({
-      where: { userId: req.userId, characterId },
-      order: [['createdAt', 'ASC']],
-      limit: 20,
-    });
+    const history = await getRecentMessages(req.userId, characterId);
 
     const assistantReply = await chat(character, history, asrText);
 
@@ -183,6 +175,15 @@ module.exports = router;
 
 function parseBoolean(value) {
   return value === true || value === 'true' || value === '1' || value === 1;
+}
+
+async function getRecentMessages(userId, characterId, limit = 20) {
+  const messages = await Message.findAll({
+    where: { userId, characterId },
+    order: [['createdAt', 'DESC'], ['id', 'DESC']],
+    limit,
+  });
+  return messages.reverse();
 }
 
 function extensionFromMime(mimeType) {

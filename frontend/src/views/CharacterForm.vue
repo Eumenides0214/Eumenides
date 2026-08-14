@@ -1,16 +1,16 @@
 <template>
-  <div class="page">
-    <div class="page-header">
+  <div class="page-shell">
+    <div class="form-hero">
       <el-button :icon="ArrowLeft" text @click="$router.back()">返回</el-button>
-      <h2>{{ isEdit ? '编辑角色' : '创建角色' }}</h2>
-      <div></div>
+      <div>
+        <p>角色工作台</p>
+        <h1>{{ isEdit ? '编辑角色' : '创建角色' }}</h1>
+      </div>
     </div>
 
     <div class="form-wrapper">
-      <el-card class="avatar-card">
-        <template #header>
-          <span>角色头像</span>
-        </template>
+      <section class="avatar-card soft-card">
+        <h3>角色头像</h3>
         <div class="avatar-section">
           <el-avatar :size="120" :src="form.avatar">
             {{ form.name?.charAt(0) || '?' }}
@@ -29,12 +29,10 @@
             </el-upload>
           </div>
         </div>
-      </el-card>
+      </section>
 
-      <el-card class="info-card">
-        <template #header>
-          <span>基本信息</span>
-        </template>
+      <section class="info-card soft-card">
+        <h3>基本信息</h3>
         <el-form :model="form" :rules="rules" ref="formRef" label-width="100px" label-position="right">
           <el-form-item label="角色名称" prop="name">
             <el-input v-model="form.name" placeholder="请输入角色名称" />
@@ -84,7 +82,7 @@
             <el-button @click="$router.back()">取消</el-button>
           </el-form-item>
         </el-form>
-      </el-card>
+      </section>
     </div>
   </div>
 </template>
@@ -175,8 +173,18 @@ async function handleGenerateAvatar() {
   }
 }
 
-function handleUploadAvatar() {
-  return false;
+function handleUploadAvatar(file) {
+  if (!file.type?.startsWith('image/')) {
+    ElMessage.error('请选择图片文件');
+    return false;
+  }
+
+  if (file.size > 5 * 1024 * 1024) {
+    ElMessage.error('图片大小不能超过 5MB');
+    return false;
+  }
+
+  return true;
 }
 
 async function customUpload(options) {
@@ -198,20 +206,43 @@ onMounted(loadCharacter);
 </script>
 
 <style scoped>
-.page-header {
+.form-hero {
   display: flex;
-  justify-content: space-between;
   align-items: center;
-  margin-bottom: 20px;
+  gap: 18px;
+  margin-bottom: 18px;
 }
-.page-header h2 {
-  font-size: 22px;
+
+.form-hero p {
+  margin: 0 0 4px;
+  color: var(--primary);
+  font-weight: 800;
 }
+
+.form-hero h1 {
+  margin: 0;
+  color: var(--text-primary);
+  font-size: 28px;
+  letter-spacing: 0;
+}
+
 .form-wrapper {
   display: grid;
   grid-template-columns: 300px 1fr;
   gap: 20px;
 }
+
+.avatar-card,
+.info-card {
+  padding: 22px;
+}
+
+.avatar-card h3,
+.info-card h3 {
+  margin: 0 0 18px;
+  color: var(--text-primary);
+}
+
 .avatar-section {
   display: flex;
   flex-direction: column;
@@ -227,6 +258,11 @@ onMounted(loadCharacter);
 @media (max-width: 768px) {
   .form-wrapper {
     grid-template-columns: 1fr;
+  }
+
+  .form-hero {
+    align-items: flex-start;
+    flex-direction: column;
   }
 }
 </style>

@@ -5,6 +5,7 @@ const multer = require('multer');
 const Character = require('../models/Character');
 const auth = require('../middleware/auth');
 const { generateAvatar } = require('../services/imageService');
+const { synthesizeVoice } = require('../services/ttsService');
 
 const router = express.Router();
 
@@ -118,6 +119,20 @@ router.post('/:id/avatar/upload', auth, upload.single('avatar'), async (req, res
     await character.save();
 
     res.json({ code: 200, message: '头像上传成功', data: { avatar: avatarUrl } });
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.post('/:id/voice/preview', auth, async (req, res, next) => {
+  try {
+    const character = await Character.findOne({ where: { id: req.params.id, userId: req.userId } });
+    if (!character) return res.status(404).json({ code: 404, message: '角色不存在' });
+
+    const text = `你好，我是${character.name}。很高兴以${character.voiceType}和你说话。`;
+    const audioUrl = await synthesizeVoice(text, character.voiceType);
+
+    res.json({ code: 200, data: { audioUrl, text } });
   } catch (err) {
     next(err);
   }

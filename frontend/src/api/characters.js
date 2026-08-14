@@ -6,6 +6,7 @@ export const createCharacter = (data) => request.post('/characters', data);
 export const updateCharacter = (id, data) => request.put(`/characters/${id}`, data);
 export const deleteCharacter = (id) => request.delete(`/characters/${id}`);
 export const generateAvatar = (id) => request.post(`/characters/${id}/avatar/generate`);
+export const previewCharacterVoice = (id) => request.post(`/characters/${id}/voice/preview`);
 export const uploadAvatar = (id, file) => {
   const fd = new FormData();
   fd.append('avatar', file);
